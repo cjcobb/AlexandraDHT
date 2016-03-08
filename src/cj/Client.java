@@ -22,33 +22,28 @@ public class Client {
         int portToUse = 3002;
 
         try {
-            store("alex","cj");
-            store("cj","love");
-            store("killer","yeah");
-            store("dont","push me");
-            store("I like","bananas");
-            store("empty","you");
-            store("nexus","sentient");
-            store("being","celestial");
-            /*for(int i = 0; i < 1000; i++) {
-                store(i +"",i+"");
-            }*/
-            join("localhost",port,portToUse);
-            System.out.println("listing entries");
-            list(ip,3001);
-            System.out.println("listing entries");
-            list(ip,3002);
+            AlexandraDHTClient client = new AlexandraDHTClient(ip,port,portToUse);
+            client.getAsync("CJ", new LookupCallback() {
+                @Override
+                public void onResponse(String key) {
+                    System.out.println("key: " + key);
+                }
+            });
 
-            /*System.out.println("joining");
-
-            list(ip,3001);
-            list(ip,3002);*/
+            client.put("CJ","Alex");
+            client.getAsync("CJ", new LookupCallback() {
+                @Override
+                public void onResponse(String key) {
+                    System.out.println("key is" + key);
+                }
+            });
         } catch (IOException e) {
             e.printStackTrace();
         }
 
 
     }
+
 
     public static AlexandraNode join(String ipAddress,int destPort,int portToUse) throws IOException
     {
@@ -128,6 +123,18 @@ public class Client {
         out.write(val.length());
         out.write(val.getBytes());
 
+        in.close();
+        out.close();
+        soc.close();
+    }
+
+    public static void sendClear(String ipAddress, int port) throws IOException {
+        Socket soc = new Socket(ipAddress,port);
+        InputStream in = soc.getInputStream();
+        OutputStream out = soc.getOutputStream();
+
+        out.write(CommandCodes.CLEAR.ordinal());
+        in.read();
         in.close();
         out.close();
         soc.close();

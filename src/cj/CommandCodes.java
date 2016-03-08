@@ -14,6 +14,8 @@ public enum CommandCodes {
     INTERNALLOOKUPRESPONSE,
     ALIVE,
     UPDATENODEID,
+    CLEAR,
+    LOOKUPRESPONSE,
     NOTFOUND;
 
     public static CommandCodes intToCommand(int i) {
@@ -28,6 +30,8 @@ public enum CommandCodes {
             case 7: return INTERNALLOOKUPRESPONSE;
             case 8: return ALIVE;
             case 9: return UPDATENODEID;
+            case 10: return CLEAR;
+            case 11: return LOOKUPRESPONSE;
             default: return NOTFOUND;
         }
     }

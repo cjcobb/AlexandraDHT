@@ -1,6 +1,7 @@
 package cj;
 
 import com.sun.tools.doclets.internal.toolkit.util.DocFinder;
+import com.sun.tools.internal.ws.processor.model.Response;
 import com.sun.xml.internal.ws.encoding.MtomCodec;
 
 import java.io.ByteArrayOutputStream;
@@ -19,10 +20,11 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Main {
 
-    static HashMap<String, String> mLocalStore = new HashMap<>();
+    static ConcurrentHashMap<String, String> mLocalStore = new ConcurrentHashMap<>();
     static MessageDigest mDigest;
 
     /*
@@ -32,6 +34,8 @@ public class Main {
     static AlexandraNode predecessor;
     static AlexandraNode successor;
     static AlexandraNode me;
+
+    static int lookupCounter = 0;
 
     public static void main(String[] args) {
         //Start
@@ -87,59 +91,23 @@ public class Main {
             InputStream in = soc.getInputStream();
             OutputStream out = soc.getOutputStream();
             CommandCodes command = CommandCodes.intToCommand(in.read());
+
             System.out.println("recevied something");
 
 
             if (command == CommandCodes.LOOKUP) {//lookup request
                 System.out.println("Received lookup request");
-
-                int length = in.read();
-                byte[] keyBytes = new byte[length];
-                in.read(keyBytes);
-
-                String key = new String(keyBytes);
-                System.out.println("Looking up key : " + key);
-
-                BigInteger hash;
-
-                hash = sha1(key);
-                if (hash.compareTo(me.nodeID) <= 0) {//lookup request
-                    //we have the node
-                    if (predecessor == null || hash.compareTo(predecessor.nodeID) == 1) {
-                        String val = lookup(key);
-                        System.out.println("Value of lookup : " + val);
-                        out.write(val.getBytes());
-                    } else { //predecessor has node
-                        System.out.println("Value not owned, asking predecessor");
-                        String val = lookupRemote(predecessor.ipAddress, predecessor.port, key);
-                        System.out.println("Value of remote lookup from predecessor : " + val);
-                        out.write(val.getBytes());
-                    }
-                } else { //successor has node
-                    System.out.println("Value not owned, asking successor");
-                    String val = lookupRemote(successor.ipAddress, successor.port, key);
-                    System.out.println("Value of remote lookup from successor: " + val);
-                    out.write(val.getBytes());
-                }
-
-
+                ResponseThread response = new ResponseThread(soc,in,out,command);
+                response.start();
             } else if (command == CommandCodes.STORE) {//store request
                 System.out.println("Received store request");
-                int keyLength = in.read();
-                byte[] keyBytes = new byte[keyLength];
-                in.read(keyBytes);
+                ResponseThread response = new ResponseThread(soc,in,out,command);
+                response.start();
 
-                int valLength = in.read();
-                byte[] valBytes = new byte[valLength];
-                in.read(valBytes);
-
-                String key = new String(keyBytes);
-                String val = new String(valBytes);
-
-                store(key, val);
-                System.out.println("Storing (" + key + "," + val + ",");
-                out.write(1);
-
+            } else if(command == CommandCodes.INTERNALLOOKUPRESPONSE) {
+                System.out.println("Recevied lookup response");
+                ResponseThread response = new ResponseThread(soc,in,out,command);
+                response.start();
             } else if (command == CommandCodes.JOIN) {//join request
                 //when getting a join request, we simply take half of the range
                 //owned by this node and give it to the new node
@@ -203,7 +171,7 @@ public class Main {
                     System.out.println("Remote node not actually running dht on proposed socket");
                     e.printStackTrace();
                 }
-
+                close(soc,in,out);
             } else if (command == CommandCodes.UPDATESUCCESSOR) {//update successor request
                 System.out.println("Received update command");
                 int ipLength = in.read();
@@ -218,7 +186,7 @@ public class Main {
 
                 successor = new AlexandraNode(newNodeId, new String(ipBytes), ByteBuffer.wrap(portBytes).getInt());
 
-
+                close(soc,in,out);
             } else if(command == CommandCodes.TRANSFER) {
                 System.out.println("Received transfer command");
                 int c = 0;
@@ -236,6 +204,7 @@ public class Main {
                     mLocalStore.put(new String(keyBytes),new String(valueBytes));
                 }
                 out.write(1);
+                close(soc,in,out);
             } else if(command == CommandCodes.LIST) {
                 System.out.println("Received list command");
                 for(Map.Entry entry : mLocalStore.entrySet()) {
@@ -247,9 +216,11 @@ public class Main {
                     out.write(value.getBytes());
                     out.write('\n');
                 }
+                close(soc,in,out);
             } else if(command == CommandCodes.ALIVE) {
                 System.out.println("received Alive request");
                 out.write(CommandCodes.ALIVE.ordinal());
+                close(soc,in,out);
             } else if(command == CommandCodes.UPDATENODEID) {
               System.out.println("received update node id request");
                 int length = in.read();
@@ -258,14 +229,28 @@ public class Main {
                 me.nodeID = new BigInteger(newNodeId);
                 System.out.println("updated node id");
                 out.write(1);
+                close(soc,in,out);
+            } else if(command == CommandCodes.CLEAR) {
+                mLocalStore.clear();
+                out.write(1);
+                if(predecessor!= null) {
+                    Client.sendClear(predecessor.ipAddress, predecessor.port);
+                }
+                close(soc,in,out);
             } else {
                 System.out.println("unrecognized command");
                 out.write("error: unrecognized command. terminating stream".getBytes());
+                close(soc,in,out);
             }
-            out.close();
-            in.close();
-            soc.close();
+
         }
+    }
+
+    public static void close(Socket soc, InputStream in, OutputStream out) throws IOException
+    {
+        out.close();
+        in.close();
+        soc.close();
     }
 
     public static void rehashAndSend(AlexandraNode node) throws IOException {
@@ -330,6 +315,16 @@ public class Main {
 
     public static void store(String key, String val) {
         mLocalStore.put(key, val);
+    }
+
+    public static int getNewLookupId() {
+        int ret = ++lookupCounter;
+        if(ret == 0) {
+            return ++lookupCounter;
+        }
+        else {
+            return lookupCounter;
+        }
     }
 
 }
