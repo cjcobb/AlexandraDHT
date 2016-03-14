@@ -16,6 +16,8 @@ public enum CommandCodes {
     UPDATENODEID,
     CLEAR,
     LOOKUPRESPONSE,
+    NODELOOKUP,
+    NODELOOKUPRESPONSE,
     NOTFOUND;
 
     public static CommandCodes intToCommand(int i) {
@@ -32,6 +34,8 @@ public enum CommandCodes {
             case 9: return UPDATENODEID;
             case 10: return CLEAR;
             case 11: return LOOKUPRESPONSE;
+            case 12: return NODELOOKUP;
+            case 13: return NODELOOKUPRESPONSE;
             default: return NOTFOUND;
         }
     }

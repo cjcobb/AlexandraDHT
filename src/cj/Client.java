@@ -8,6 +8,7 @@ import java.math.BigInteger;
 import java.net.Inet4Address;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Created by cj on 3/2/16.
@@ -19,7 +20,7 @@ public class Client {
         String val = "bar";
         String ip = "localhost";
         int port = 3001;
-        int portToUse = 3002;
+        int portToUse = 3003;
 
         try {
             AlexandraDHTClient client = new AlexandraDHTClient(ip,port,portToUse);
@@ -35,6 +36,18 @@ public class Client {
                 @Override
                 public void onResponse(String key) {
                     System.out.println("key is" + key);
+                }
+            });
+            try {
+                Main.setUpHash("SHA1");
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            }
+            client.getNodeAsync(Main.getRandomHash(), new NodeLookupCallback() {
+                @Override
+                public void onResponse(Node node) {
+                    System.out.println("Node ip is " + node.ip);
+                    System.out.println("Node port is " + node.port);
                 }
             });
         } catch (IOException e) {

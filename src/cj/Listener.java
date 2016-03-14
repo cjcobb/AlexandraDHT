@@ -42,6 +42,24 @@ public class Listener extends Thread {
 
                     LookupCallback callback = me.requests.get(id);
                     callback.onResponse(val);
+                } else if(command == CommandCodes.NODELOOKUPRESPONSE) {
+                    System.out.println("Recevied lookup response");
+                    byte[] idBytes = new byte[4];
+                    in.read(idBytes);
+                    int id = ByteBuffer.wrap(idBytes).getInt();
+
+                    int ipLength = in.read();
+                    byte[] ipBytes = new byte[ipLength];
+                    in.read(ipBytes);
+
+                    byte[] portBytes = new byte[4];
+                    in.read(portBytes);
+
+                    Node node = new Node(new String(ipBytes),ByteBuffer.wrap(portBytes).getInt());
+                    out.write(1);
+
+                    NodeLookupCallback callback = me.nodeRequests.get(id);
+                    callback.onResponse(node);
                 } else {
                     System.out.println("Unrecognized command");
                 }

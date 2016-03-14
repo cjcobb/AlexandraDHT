@@ -6,14 +6,13 @@ package cj;
 public class Lookup {
     String key;
     int id;
-    String senderIp;
-    int senderPort;
+    String returnIp;
+    int returnPort;
 
     public Lookup(String key, int id, String senderIp, int senderPort) {
         this.key = key;
         this.id = id;
-        this.senderIp = senderIp;
-        this.senderPort = senderPort;
-
+        this.returnIp = senderIp;
+        this.returnPort = senderPort;
     }
 }

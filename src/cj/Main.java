@@ -16,10 +16,7 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Main {
@@ -37,10 +34,17 @@ public class Main {
 
     static int lookupCounter = 0;
 
+    static AlexandraDHTClient client;
+    static String myIp;
+    static int myPort;
+    static int myListenerPort;
+
     public static void main(String[] args) {
         //Start
         System.out.println("Joining distributed hash table...");
         String algorithm = "SHA1";
+
+        System.out.println("Date is " + new Date().getTime());
         try {
             setUpHash(algorithm);
         } catch (NoSuchAlgorithmException e) {
@@ -50,16 +54,35 @@ public class Main {
         }
         try {
 
-            String ipAddress = Inet4Address.getLocalHost().getHostAddress();
-            int port = Integer.parseInt(args[0]);
-            me = new AlexandraNode(maxHash(), ipAddress, port);
-            System.out.println("My node id is " + maxHash());
+            myIp = Inet4Address.getLocalHost().getHostAddress();
+            myPort = Integer.parseInt(args[0]);
+            myListenerPort = Integer.parseInt(args[1]);
 
-            if(args.length > 1) {
-                String ipToJoin = args[1];
-                int portToJoin = Integer.parseInt(args[2]);
+
+            if(args.length > 2) {
+                String contactIp = args[2];
+                int contactPort = Integer.parseInt(args[3]);
+                BigInteger myId = getRandomHash();
+                me = new AlexandraNode(myId,myIp,myPort);
+                client = new AlexandraDHTClient(contactIp,contactPort,myListenerPort);
+
+                client.getNodeAsync(myId, new NodeLookupCallback() {
+                    @Override
+                    public void onResponse(Node node) {
+                        try {
+                            join(node.ip, node.port);
+                        } catch(IOException e) {
+                            System.out.println("Error joining");
+                            e.printStackTrace();
+                        }
+                    }
+                });
+
+            } else {
+                me = new AlexandraNode(maxHash(), myIp, myPort);
+                System.out.println("My node id is " + maxHash());
             }
-            serverLoop(port);
+            serverLoop(myPort);
         } catch (IOException e) {
             e.printStackTrace();
             System.out.println("error joining distributed hash table");
@@ -76,6 +99,12 @@ public class Main {
             bytes[i] = (byte) 0xFF;
         }
         return new BigInteger(1,bytes);
+    }
+
+    public static BigInteger getRandomHash() {
+        Date now = new Date();
+        double rand = Math.random();
+        return sha1((now.toString() + rand));
     }
 
     /*
@@ -104,6 +133,10 @@ public class Main {
                 ResponseThread response = new ResponseThread(soc,in,out,command);
                 response.start();
 
+            } else if(command == CommandCodes.NODELOOKUP) {
+                System.out.println("Received store request");
+                ResponseThread response = new ResponseThread(soc,in,out,command);
+                response.start();
             } else if(command == CommandCodes.INTERNALLOOKUPRESPONSE) {
                 System.out.println("Recevied lookup response");
                 ResponseThread response = new ResponseThread(soc,in,out,command);
@@ -121,56 +154,12 @@ public class Main {
                 ByteBuffer buf = ByteBuffer.wrap(portBytes);
                 int remotePort = buf.getInt();
 
-                //TODO: this returns localhost
-                String remoteIp = soc.getInetAddress().getHostAddress();
-                System.out.println("Remote node attempting to join via ip : " + remoteIp + " and port : " + remotePort);
-                try {
-                    Socket testSoc = new Socket(remoteIp, remotePort);
-                    InputStream testIn = testSoc.getInputStream();
-                    OutputStream testOut = testSoc.getOutputStream();
-                    testOut.write(CommandCodes.ALIVE.ordinal());
-                    int response = testIn.read();
-                    testSoc.close();
-                    if (CommandCodes.intToCommand(response) == CommandCodes.ALIVE) {
-                        out.write(1);
-                        System.out.println("Remote node joining via ip : " + remoteIp + " and port : " + remotePort);
+                int idLength = in.read();
+                byte[] idBytes = new byte[idLength];
+                in.read(idBytes);
 
-                        BigInteger predId = predecessor != null ? predecessor.nodeID : BigInteger.ZERO;
-                        BigInteger newId = predId.add(me.nodeID.subtract(predId).shiftRight(1));
+                rehashAndSend(in,out,new BigInteger(idBytes));
 
-                        System.out.println("New nodes id is " + newId);
-
-                        AlexandraNode newPred = new AlexandraNode(newId, remoteIp, remotePort);
-                        byte[] idBytes = newId.toByteArray();
-                        out.write(idBytes.length);
-                        out.write(idBytes);
-
-                        Socket newNodeSoc = new Socket(remoteIp,remotePort);
-                        InputStream newNodeIn = newNodeSoc.getInputStream();
-                        OutputStream newNodeOut = newNodeSoc.getOutputStream();
-                        newNodeOut.write(CommandCodes.UPDATENODEID.ordinal());
-                        newNodeOut.write(idBytes.length);
-                        newNodeOut.write(idBytes);
-                        System.out.println("sent new node id to new node");
-                        newNodeIn.read();
-                        System.out.println("read ack");
-                        newNodeIn.close();
-                        newNodeOut.close();
-                        newNodeSoc.close();
-                        if (predecessor != null) {
-                            Client.sendUpdateSuccessor(predecessor.ipAddress, predecessor.port, remoteIp, remotePort, newId);
-                        }
-                        predecessor = newPred;
-                        System.out.println("rehashing");
-                        rehashAndSend(newPred);
-                        System.out.println("done rehashing");
-                    } else {
-                        out.write(-1);
-                    }
-                } catch (IOException e) {
-                    System.out.println("Remote node not actually running dht on proposed socket");
-                    e.printStackTrace();
-                }
                 close(soc,in,out);
             } else if (command == CommandCodes.UPDATESUCCESSOR) {//update successor request
                 System.out.println("Received update command");
@@ -253,22 +242,14 @@ public class Main {
         soc.close();
     }
 
-    public static void rehashAndSend(AlexandraNode node) throws IOException {
-        Socket soc = new Socket(node.ipAddress, node.port);
-        InputStream in = soc.getInputStream();
-        OutputStream out = soc.getOutputStream();
-        System.out.println("sending transfer command");
-        out.write(CommandCodes.TRANSFER.ordinal());
-        System.out.println("send ordinal command");
-
-
+    public static void rehashAndSend(InputStream in, OutputStream out, BigInteger hash) throws IOException {
         Set<String> keysToRemove = new HashSet<>();
 
         for (Map.Entry entry : mLocalStore.entrySet()) {
             String key = (String) entry.getKey();
             String value = (String) entry.getValue();
 
-            if (sha1(key).compareTo(node.nodeID) <= 0) {
+            if (sha1(key).compareTo(hash) <= 0) {
                 System.out.println("sending entry");
                 out.write(1);
                 out.write(key.length());
@@ -289,9 +270,6 @@ public class Main {
         }
         in.read();
         System.out.println("received ack");
-        in.close();
-        out.close();
-        soc.close();
     }
 
     public static String lookupRemote(String ipAddress, int port, String key) throws IOException {
@@ -301,7 +279,9 @@ public class Main {
     //hashes a key to a big int
     public static BigInteger sha1(String str) {
 
-        byte[] result = mDigest.digest(str.getBytes());
+        byte[] input = str.getBytes();
+
+        byte[] result = mDigest.digest(input);
         return new BigInteger(1,result);
     }
 
@@ -325,6 +305,41 @@ public class Main {
         else {
             return lookupCounter;
         }
+    }
+
+    public static void join(String destIp,int destPort) throws IOException
+    {
+        Socket soc = new Socket(destIp,destPort);
+        InputStream in = soc.getInputStream();
+        OutputStream out = soc.getOutputStream();
+
+        ByteBuffer buf = ByteBuffer.allocate(4);
+        buf.putInt(myPort);
+        out.write(CommandCodes.JOIN.ordinal());
+        out.write(buf.array());
+
+        byte[] idBytes = me.nodeID.toByteArray();
+        out.write(idBytes.length);
+        out.write(idBytes);
+
+        int c = 0;
+        while((c = in.read())!= 0){
+            System.out.println("reading value");
+            int keyLength = in.read();
+            byte[] keyBytes = new byte[keyLength];
+            in.read(keyBytes);
+            System.out.println("key is " + new String(keyBytes));
+            int valueLength = in.read();
+            byte[] valueBytes = new byte[valueLength];
+            in.read(valueBytes);
+            System.out.println("value is " + new String(valueBytes));
+
+            mLocalStore.put(new String(keyBytes),new String(valueBytes));
+        }
+        out.write(1);
+
+
+
     }
 
 }

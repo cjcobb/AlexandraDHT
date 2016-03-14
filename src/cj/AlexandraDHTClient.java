@@ -3,6 +3,7 @@ package cj;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigInteger;
 import java.net.Inet4Address;
 import java.net.Socket;
 import java.net.UnknownHostException;
@@ -18,6 +19,7 @@ public class AlexandraDHTClient {
     String contactIp;
     int contactPort;
     ConcurrentHashMap<Integer,LookupCallback> requests;
+    ConcurrentHashMap<Integer,NodeLookupCallback> nodeRequests;
     int requestIdCounter = 0;
     int listenerPort;
     String listenerIp;
@@ -27,6 +29,7 @@ public class AlexandraDHTClient {
         this.contactIp = contactIp;
         this.contactPort = contactPort;
         this.requests = new ConcurrentHashMap<>();
+        this.nodeRequests = new ConcurrentHashMap<>();
         this.listenerPort = listenerPort;
         try {
             this.listenerIp = Inet4Address.getLocalHost().getHostAddress();
@@ -58,6 +61,41 @@ public class AlexandraDHTClient {
         String ip = listenerIp;
         byte[] ipBytes = ip.getBytes();
 
+        byte[] ipLengthBytes = ByteBuffer.allocate(4).putInt(ipBytes.length).array();
+        out.write(ipLengthBytes);
+        out.write(ipBytes);
+
+        int port = listenerPort;
+        ByteBuffer portBuf = ByteBuffer.allocate(4).putInt(port);
+        out.write(portBuf.array());
+
+
+
+        in.read();
+
+        in.close();
+        out.close();
+        soc.close();
+    }
+
+    public void getNodeAsync(BigInteger hash, NodeLookupCallback callback) throws IOException {
+        int id = getNewRequestId();
+        nodeRequests.put(id,callback);
+
+        Socket soc = new Socket(contactIp,contactPort);
+        InputStream in = soc.getInputStream();
+        OutputStream out = soc.getOutputStream();
+
+        byte[] hashBytes = hash.toByteArray();
+        out.write(CommandCodes.NODELOOKUP.ordinal());
+        out.write(hashBytes.length);
+        out.write(hashBytes);
+
+        byte[] idBytes = ByteBuffer.allocate(4).putInt(id).array();
+        out.write(idBytes);
+
+        String ip = listenerIp;
+        byte[] ipBytes = ip.getBytes();
         byte[] ipLengthBytes = ByteBuffer.allocate(4).putInt(ipBytes.length).array();
         out.write(ipLengthBytes);
         out.write(ipBytes);
